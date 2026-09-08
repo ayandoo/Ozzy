@@ -1,0 +1,82 @@
+name: Build OZZY V31 Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'OZZY_V30_GITHUB_ACTIONS_READY.zip'
+      - '.github/workflows/build-ozzy-v31-android.yml'
+
+permissions:
+  contents: read
+
+env:
+  GRADLE_VERSION: '8.7'
+
+jobs:
+  build-android:
+    name: Build OZZY Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify source archive
+        run: |
+          test -f OZZY_V30_GITHUB_ACTIONS_READY.zip
+          unzip -l OZZY_V30_GITHUB_ACTIONS_READY.zip | grep -E '^.*android/' | head -20
+
+      - name: Extract Android project only
+        run: |
+          rm -rf ozzy
+          mkdir -p ozzy
+          unzip -q OZZY_V30_GITHUB_ACTIONS_READY.zip -d ozzy
+          test -f ozzy/android/settings.gradle
+          test -f ozzy/android/app/build.gradle
+          test -f ozzy/android/app/src/main/AndroidManifest.xml || test -f ozzy/android/AndroidManifest.xml
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Inspect Android project
+        working-directory: ozzy/android
+        run: |
+          echo '--- settings.gradle ---'
+          cat settings.gradle
+          echo '--- app/build.gradle ---'
+          cat app/build.gradle
+          echo '--- project files ---'
+          find . -maxdepth 4 -type f | sort | head -250
+
+      - name: Build debug APK
+        working-directory: ozzy/android
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Verify APK exists
+        run: |
+          find ozzy/android/app/build/outputs/apk/debug -type f -name '*.apk' -print
+          test -n "$(find ozzy/android/app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+
+      - name: Rename APK
+        run: |
+          mkdir -p release
+          APK=$(find ozzy/android/app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)
+          cp "$APK" release/OZZY-V31-Android-debug.apk
+          sha256sum release/OZZY-V31-Android-debug.apk | tee release/OZZY-V31-Android-debug.apk.sha256
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OZZY-V31-Android-APK
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
